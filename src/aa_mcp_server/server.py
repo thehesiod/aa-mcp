@@ -50,7 +50,7 @@ def check_auth_status(account: str = "") -> str:
 
 
 @mcp.tool()
-def save_session_from_browser(account: str = "default", port: int = DEFAULT_PORT) -> str:
+def save_session_from_browser(account: str = "default", port: str = "") -> str:
     """Pull cookies from a logged-in Chromium (started by aa-auth-browser) and save them.
 
     Workflow:
@@ -60,9 +60,12 @@ def save_session_from_browser(account: str = "default", port: int = DEFAULT_PORT
 
     Args:
         account: Account name to associate with the saved cookies. Default: "default".
-        port: Chromium remote-debugging port (default 9224, matches aa-auth-browser).
+        port: Chromium remote-debugging port as a string. Empty/omitted uses the default
+              (9224, matches aa-auth-browser). Pass as string to avoid MCP type-coercion
+              issues with some clients.
     """
-    info = extract_session_from_browser(account, port=port)
+    port_int = int(port) if port else DEFAULT_PORT
+    info = extract_session_from_browser(account, port=port_int)
     _evict(account)
     return json.dumps(info, indent=2)
 
