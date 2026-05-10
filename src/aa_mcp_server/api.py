@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from curl_cffi import requests as curl_requests
+from yarl import URL
 
 from aa_mcp_server.auth import AASession
 
@@ -32,6 +33,9 @@ TRAVEL_CREDITS_TRIP = f"{BASE}/api/loyalty/travelCredits/tripCredit/details"
 MEMBER_ACTIVITY = f"{BASE}/api/loyalty/miles/transaction/orchestrator/memberActivity"
 PROFILE_DETAILS = f"{BASE}/api/loyalty/miles/transaction/orchestrator/profile"
 PROMO_RIBBONS = f"{BASE}/api/loyalty/br/retrieve/account"
+
+# /manage-reservation/viewres/api/* — guest-lookup-style endpoints (need first+last name).
+RESERVATION_DETAIL = f"{BASE}/manage-reservation/viewres/api/reservation"
 
 GRAPHQL_ENDPOINT = f"{BASE}/services/graphql"
 
@@ -215,6 +219,33 @@ class AAAPI:
     def promo_ribbons(self) -> dict:
         """Promotional ribbons/badges shown on account summary."""
         return self._request("GET", PROMO_RIBBONS)  # type: ignore[return-value]
+
+    # ---- /manage-reservation/viewres/api/* ----
+
+    def reservation_detail(self, record_locator: str, first_name: str, last_name: str) -> dict:
+        """Full reservation details — segments, passengers, tickets, costs, eligibility flags.
+
+        first_name/last_name must match the lead passenger on the booking; the endpoint
+        is a guest-lookup-style POST that validates both even when authenticated.
+        """
+        referer_path = str(
+            URL("/reservation/selectReservationSubmit.do").with_query(
+                {"recordLocator": record_locator}
+            )
+        )
+        body = {
+            "recordLocator": record_locator,
+            "firstName": first_name,
+            "lastName": last_name,
+            "fromSource": True,
+            "locale": "en_US",
+        }
+        return self._request(  # type: ignore[return-value]
+            "POST",
+            RESERVATION_DETAIL,
+            json_body=body,
+            referer_path=referer_path,
+        )
 
     # ---- GraphQL ----
 

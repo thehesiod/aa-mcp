@@ -10,6 +10,7 @@ from aa_mcp_server.api import AAAPI, default_activity_window
 from aa_mcp_server.auth import (
     AASession,
     extract_session_from_browser,
+    extract_session_from_browser_async,
     get_default_account,
     list_accounts,
 )
@@ -50,7 +51,7 @@ def check_auth_status(account: str = "") -> str:
 
 
 @mcp.tool()
-def save_session_from_browser(account: str = "default", port: str = "") -> str:
+async def save_session_from_browser(account: str = "default", port: str = "") -> str:
     """Pull cookies from a logged-in Chromium (started by aa-auth-browser) and save them.
 
     Workflow:
@@ -65,7 +66,7 @@ def save_session_from_browser(account: str = "default", port: str = "") -> str:
               issues with some clients.
     """
     port_int = int(port) if port else DEFAULT_PORT
-    info = extract_session_from_browser(account, port=port_int)
+    info = await extract_session_from_browser_async(account, port=port_int)
     _evict(account)
     return json.dumps(info, indent=2)
 
@@ -150,6 +151,35 @@ def get_upcoming_trips(account: str = "") -> str:
         account: Account name (optional, uses default).
     """
     return json.dumps(_get_api(account).upcoming_trips(), indent=2)
+
+
+@mcp.tool()
+def get_reservation_by_locator(
+    record_locator: str,
+    last_name: str,
+    first_name: str,
+    account: str = "",
+) -> str:
+    """Full reservation details by record locator + lead passenger name.
+
+    Returns the complete viewres payload: passengers (with passengerID like "01.01"),
+    itinerary slices and segments (flight numbers, times, fare codes, booking codes),
+    tickets (one per passenger), cost summary, eligibilityFlags (cancel / change /
+    partial-reshop), and eligibleProducts (deep links to change-flow URLs).
+
+    The underlying endpoint validates first+last name against the lead passenger on
+    the PNR, so both are required even when authenticated.
+
+    Args:
+        record_locator: 6-character PNR (e.g., "UHJHHT").
+        last_name: Lead passenger last name (e.g., "Mohr").
+        first_name: Lead passenger first name (e.g., "Alexander").
+        account: Account name (optional, uses default).
+    """
+    return json.dumps(
+        _get_api(account).reservation_detail(record_locator, first_name, last_name),
+        indent=2,
+    )
 
 
 @mcp.tool()

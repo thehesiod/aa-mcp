@@ -105,12 +105,12 @@ async def _cdp_get_all_cookies(port: int) -> list[dict]:
                 return msg.get("result", {}).get("cookies", [])
 
 
-def extract_session_from_browser(account: str, port: int = 9224) -> dict:
-    """Pull cookies from a logged-in Chromium (started by aa-auth-browser) and save them.
+async def extract_session_from_browser_async(account: str, port: int = 9224) -> dict:
+    """Async core of extract_session_from_browser — safe to call from inside an event loop.
 
     Returns a status dict (account, num_cookies, aadvantage_number, token_exp).
     """
-    cookies = asyncio.run(_cdp_get_all_cookies(port))
+    cookies = await _cdp_get_all_cookies(port)
     aa_cookies = [
         c for c in cookies
         if any(c.get("domain", "").endswith(d.lstrip(".")) for d in AA_COOKIE_DOMAINS)
@@ -156,6 +156,11 @@ def extract_session_from_browser(account: str, port: int = 9224) -> dict:
         "aadvantage_number": payload.get("aadvantage_number"),
         "token_exp": payload.get("token_exp"),
     }
+
+
+def extract_session_from_browser(account: str, port: int = 9224) -> dict:
+    """Sync wrapper — for CLI use only. Will fail if called from inside a running event loop."""
+    return asyncio.run(extract_session_from_browser_async(account, port=port))
 
 
 class AASession:
