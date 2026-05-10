@@ -4,6 +4,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from curl_cffi import requests as curl_requests
 from yarl import URL
@@ -36,6 +37,10 @@ PROMO_RIBBONS = f"{BASE}/api/loyalty/br/retrieve/account"
 
 # /manage-reservation/viewres/api/* — guest-lookup-style endpoints (need first+last name).
 RESERVATION_DETAIL = f"{BASE}/manage-reservation/viewres/api/reservation"
+
+# /manage-reservation/reshop/api/* — change-flight (reshop) endpoints. Stateless; require
+# the encrypted `data` blob from eligibleProducts[CHANGE].outletUrl on the reservation.
+RESHOP_CHEAPEST = f"{BASE}/manage-reservation/reshop/api/reshop/cheapest"
 
 GRAPHQL_ENDPOINT = f"{BASE}/services/graphql"
 
@@ -243,6 +248,96 @@ class AAAPI:
         return self._request(  # type: ignore[return-value]
             "POST",
             RESERVATION_DETAIL,
+            json_body=body,
+            referer_path=referer_path,
+        )
+
+    # ---- /manage-reservation/reshop/api/* ----
+
+    def _change_flight_data_blob(
+        self, record_locator: str, first_name: str, last_name: str
+    ) -> str:
+        """Extract the encrypted `data` blob from eligibleProducts[CHANGE].outletUrl.
+
+        The blob is server-issued state tying a reshop session to a specific PNR +
+        ticket combo. Every /reshop/api/* call requires it. Fresh on every viewres call.
+        """
+        res = self.reservation_detail(record_locator, first_name, last_name)
+        for product in res.get("eligibleProducts", []):
+            if product.get("name") != "CHANGE":
+                continue
+            params = parse_qs(urlparse(product.get("outletUrl", "")).query)
+            if data := params.get("data"):
+                return data[0]
+        raise RuntimeError(
+            f"No CHANGE eligibleProduct on PNR {record_locator} — the booking may not be changeable."
+        )
+
+    def reshop_cheapest(
+        self,
+        record_locator: str,
+        first_name: str,
+        last_name: str,
+        departure_date: str,
+        origin_airport: str,
+        destination_airport: str,
+        slice_index: int = 0,
+        carousel_days: bool = True,
+    ) -> dict:
+        """Search alternative flights for one slice of a reservation.
+
+        Returns the AA "reshop cheapest" payload: a date carousel (±6 days around
+        departure_date with min price per date) plus up to 40 flight options, each
+        with flightCells covering the cabin/fare buckets the customer is eligible for.
+
+        Prices are TOTAL for all passengers on the PNR — the endpoint does not
+        support per-passenger pricing. AA appears to accept origin and destination
+        changes (not just dates) for at least some fare rules; the server returns
+        SUCCESS or an error depending on whether the change is allowed.
+
+        Gotcha: `carouselDays.minPrice` is advisory and may not match `flightCells.netPrice`
+        for the same date. We've seen carousel values lower than any cell's netPrice on
+        the same query, suggesting the carousel reflects fare buckets the customer isn't
+        actually eligible to book. Treat `flightCells.netPrice` as authoritative.
+
+        Fetches a fresh `data` blob from eligibleProducts[CHANGE].outletUrl on every
+        call (the blob is short-lived; refetch each time).
+        """
+        data_blob = self._change_flight_data_blob(record_locator, first_name, last_name)
+        referer_path = str(
+            URL("/manage-reservation/reshop/v2/change-flights").with_query(
+                {
+                    "recordLocator": record_locator,
+                    "data": data_blob,
+                    "from": "change_res",
+                }
+            )
+        )
+        body = {
+            "transactionId": str(uuid.uuid4()).upper(),
+            "clientId": "AACOM_ChangeRes",
+            "searchCriteria": {
+                "flightDetails": [
+                    {
+                        "departureDate": departure_date,
+                        "originAirportCode": origin_airport,
+                        "destinationAirportCode": destination_airport,
+                        "selectedSliceForChange": True,
+                        "sliceIndex": slice_index,
+                        "flown": False,
+                    }
+                ]
+            },
+            "currentSearchSlice": 0,
+            "originalReservationTotalSlices": "1",
+            "recordLocator": record_locator,
+            "tripType": "ONEWAY",
+            "data": data_blob,
+            "carouselDays": carousel_days,
+        }
+        return self._request(  # type: ignore[return-value]
+            "POST",
+            RESHOP_CHEAPEST,
             json_body=body,
             referer_path=referer_path,
         )

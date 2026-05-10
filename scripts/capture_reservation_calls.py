@@ -15,7 +15,15 @@ import websockets
 from curl_cffi import requests as curl_requests
 from yarl import URL
 
-INTEREST = ("/loyalty/api/", "/api/loyalty/", "/api/", "/services/graphql")
+INTEREST = (
+    "/loyalty/api/",
+    "/api/loyalty/",
+    "/api/",
+    "/services/graphql",
+    "/manage-reservation/",
+    "/reshop/",
+    "/booking/",
+)
 SKIP_EXT = (".js", ".css", ".png", ".jpg", ".svg", ".woff", ".woff2", ".ico", ".gif")
 
 AA_BASE = URL("https://www.aa.com")
@@ -61,19 +69,28 @@ def is_interesting(url: str) -> bool:
     return True
 
 
-async def capture(page_ws: str, target_url: str, duration_seconds: float) -> list[dict[str, Any]]:
-    """Navigate target_url and capture interesting JSON requests for duration_seconds."""
+async def capture(
+    page_ws: str,
+    target_url: str | None,
+    duration_seconds: float,
+) -> list[dict[str, Any]]:
+    """Capture interesting JSON requests for duration_seconds.
+
+    If target_url is given, navigate there first; otherwise listen passively while
+    the user drives the page manually.
+    """
     requests_by_id: dict[str, dict[str, Any]] = {}
     next_id = iter(range(100, 1_000_000))
 
     async with websockets.connect(page_ws, max_size=64 * 1024 * 1024) as ws:
         await ws.send(json.dumps({"id": next(next_id), "method": "Network.enable"}))
         await ws.send(json.dumps({"id": next(next_id), "method": "Page.enable"}))
-        await ws.send(json.dumps({
-            "id": next(next_id),
-            "method": "Page.navigate",
-            "params": {"url": target_url},
-        }))
+        if target_url:
+            await ws.send(json.dumps({
+                "id": next(next_id),
+                "method": "Page.navigate",
+                "params": {"url": target_url},
+            }))
 
         deadline = asyncio.get_event_loop().time() + duration_seconds
         get_body_pending: dict[int, str] = {}
@@ -131,18 +148,34 @@ async def capture(page_ws: str, target_url: str, duration_seconds: float) -> lis
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=9224)
-    ap.add_argument("--locator", required=True, help="Record locator, e.g. UHJHHT")
+    ap.add_argument("--locator", help="Record locator, e.g. UHJHHT (used if --url not given)")
+    ap.add_argument("--url", help="Full URL to navigate to (overrides --locator)")
+    ap.add_argument(
+        "--listen",
+        action="store_true",
+        help="Don't navigate; attach to the existing aa.com tab and listen passively while you drive the page.",
+    )
     ap.add_argument("--duration", type=float, default=12.0)
     args = ap.parse_args()
 
-    target_url = str(
-        (AA_BASE / "reservation/selectReservationSubmit.do").with_query(
-            {"recordLocator": args.locator}
+    if args.listen:
+        target_url = None
+    elif args.url:
+        target_url = args.url
+    elif args.locator:
+        target_url = str(
+            (AA_BASE / "reservation/selectReservationSubmit.do").with_query(
+                {"recordLocator": args.locator}
+            )
         )
-    )
-    page_ws = await find_or_create_aa_target(args.port, target_url)
+    else:
+        ap.error("must pass --url, --locator, or --listen")
+    page_ws = await find_or_create_aa_target(args.port, target_url or str(AA_BASE))
     print("# attached", file=sys.stderr)
-    print("# navigating: " + target_url, file=sys.stderr)
+    if target_url:
+        print("# navigating: " + target_url, file=sys.stderr)
+    else:
+        print("# listening passively for {:.0f}s".format(args.duration), file=sys.stderr)
 
     items = await capture(page_ws, target_url, args.duration)
 

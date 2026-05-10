@@ -43,10 +43,12 @@ We store the **full** cookie set, not just `access_token` — Akamai's bot-detec
 
 ### Endpoint families
 
-Two distinct families, both cookie-authenticated:
+Three distinct families, all cookie-authenticated:
 
 - **`/loyalty/api/*`** — XSRF-protected (`x-xsrf-token` header required), used by the React SPA at `/aadvantage-program/profile/*`. Members info, progress, trips, notifications.
 - **`/api/loyalty/*`** — Same auth model but no XSRF requirement on most. Mile activity, profile details, travel credits, promo ribbons.
+- **`/manage-reservation/viewres/api/*`** — Manage-trip surface. Cookie-authenticated AND requires `firstName` + `lastName` + `recordLocator` in the body — the endpoint validates the name pair against the lead passenger on every call, even when authenticated. Referer must be `/reservation/selectReservationSubmit.do?recordLocator=<PNR>`. This is the same shape AA exposes for non-account guest lookups; logged-in users hit the same endpoint.
+- **`/manage-reservation/reshop/api/*`** — Change-flight (reshop) surface, used by the change-flights wizard at `/manage-reservation/reshop/v2/change-flights`. Stateless from the call's perspective: each request takes a `data` field whose value is an **encrypted server-issued state blob** extracted from `eligibleProducts[CHANGE].outletUrl` on the viewres response (look at the `?data=` query param). The blob is short-lived — refetch it on each shop. The referer header should be the corresponding change-flights URL with `recordLocator` + `data` + `from=change_res` query args. No per-passenger pricing — the wizard prices the whole PNR. Partial-passenger changes (one of N pax) usually require splitting the PNR (`divideEligible` flag) or a phone agent. Notable endpoint: `/reshop/api/reshop/cheapest` returns a ±6-day price carousel plus per-cabin flight options for one slice — `netPrice` on each cell is the delta vs what's already paid (negative = travel credit, positive = additional payment).
 - **`/services/graphql`** — Apollo with persisted queries (sha256Hash, no inline query string). Only `GetCustomer` is wired up; adding more = capture the hash from the browser bundle.
 
 ### Response format
@@ -70,6 +72,10 @@ If `_abck` / `bm_*` cookies fall out of sync, even valid `access_token` requests
 ### Persisted GraphQL queries
 
 The `GRAPHQL_GET_CUSTOMER_HASH` constant is the sha256 of the GetCustomer operation as of capture. If aa.com rebuilds the bundle and rotates the hash, the call fails with `PersistedQueryNotFound`. Re-capture from the browser's Network panel — look at the `extensions.persistedQuery.sha256Hash` field on a `/services/graphql` POST.
+
+### Reshop carousel vs cells
+
+`reshop_cheapest` returns two pricing surfaces: `carouselDays[].minPrice` (one number per date in a ±6-day window) and `flightRows[].flightCells[].netPrice` (per-cabin per-option). These don't always agree — observed cases where the carousel reports a delta significantly lower (or even negative) on a date where every actual `flightCells` cell starts at a higher positive number. The likely explanation is the carousel reflects fare buckets the customer isn't eligible for (e.g., Basic Economy when their original ticket can't downgrade into BE). Trust `flightCells.netPrice` as the bookable price; treat `carouselDays.minPrice` as a hint only.
 
 ### Account-information page
 

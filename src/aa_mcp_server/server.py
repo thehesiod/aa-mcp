@@ -183,6 +183,62 @@ def get_reservation_by_locator(
 
 
 @mcp.tool()
+def search_change_flights(
+    record_locator: str,
+    last_name: str,
+    first_name: str,
+    departure_date: str,
+    origin_airport: str,
+    destination_airport: str,
+    slice_index: int = 0,
+    carousel_days: bool = True,
+    account: str = "",
+) -> str:
+    """Search alternative flights for an existing reservation (the "change flight" flow).
+
+    Returns the full reshop payload: a ±6-day price carousel around departure_date,
+    plus up to 40 flight options with per-cabin pricing (flightCells contain fare,
+    netPrice = delta vs paid, cabinType, fareType, changeType, seatsLeft).
+
+    The endpoint allows changing origin city, destination city, and date in a single
+    query — AA validates against the original fare rules and either returns SUCCESS
+    or an error. Negative netPrice means you'd be issued a travel credit; positive
+    means additional payment due. Change fees are usually $0 (waived on non-Basic-
+    Economy fares).
+
+    PRICING SCOPE: All numbers are TOTAL for every passenger on the PNR. This
+    endpoint does not support per-passenger pricing. To change only some passengers
+    on a multi-pax booking, the PNR typically has to be split first via an agent
+    (the `divideEligible` flag on the reservation indicates whether the self-serve
+    split is allowed; partial reshop without a split usually requires a phone agent).
+
+    Args:
+        record_locator: 6-character PNR (e.g., "UHJHHT").
+        last_name: Lead passenger last name.
+        first_name: Lead passenger first name.
+        departure_date: New departure date (YYYY-MM-DD).
+        origin_airport: New origin airport (3-letter IATA — can differ from original).
+        destination_airport: New destination airport (3-letter IATA — can differ from original).
+        slice_index: Which slice of the reservation to change (0 = first; matters for round-trips).
+        carousel_days: Include the ±6-day min-price grid in the response (default True).
+        account: Account name (optional, uses default).
+    """
+    return json.dumps(
+        _get_api(account).reshop_cheapest(
+            record_locator,
+            first_name,
+            last_name,
+            departure_date,
+            origin_airport,
+            destination_airport,
+            slice_index=slice_index,
+            carousel_days=carousel_days,
+        ),
+        indent=2,
+    )
+
+
+@mcp.tool()
 def get_flight_credits(locale: str = "en_US", account: str = "") -> str:
     """Flight credits (single-passenger ticket credits from cancelled flights).
 

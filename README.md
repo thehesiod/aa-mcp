@@ -13,6 +13,8 @@ This is **not** a browser-automation wrapper. The server discovers and calls aa.
 | `get_profile_details` | `/api/loyalty/.../profile` | DOB, partners list, sales city, mile expiration, million-miler stats |
 | `get_mile_activity` | `/api/loyalty/.../memberActivity` | Mile/LP transaction history (date range, paginated, searchable) |
 | `get_upcoming_trips` | `/loyalty/api/upcoming-trips` | Reservations with record locators |
+| `get_reservation_by_locator` | `/manage-reservation/viewres/api/reservation` | Full reservation: segments, passengers, tickets, costs, change/cancel eligibility (requires lead-passenger name) |
+| `search_change_flights` | `/manage-reservation/reshop/api/reshop/cheapest` | Alternative flights for a reservation with a ±6-day price carousel, per-cabin pricing (`netPrice` = delta vs paid). Accepts origin/destination/date changes; pricing is total for all pax (no per-passenger split) |
 | `get_flight_credits` | `/api/loyalty/travelCredits/flightCredit/details` | Single-passenger ticket credits |
 | `get_trip_credits` | `/api/loyalty/travelCredits/tripCredit/details` | Multi-passenger / itinerary credits |
 | `get_partner_offers` | `/loyalty/api/partnerOffers` | Dashboard partner promotions |
