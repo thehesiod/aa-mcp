@@ -1,6 +1,6 @@
 [project]
 name = "aa-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for read-only American Airlines AAdvantage account access — direct API calls via session cookies extracted from a Chromium login"
 readme = "README.md"
 license = "MIT"
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Office/Business",
 ]
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    "mcp[cli]>=2,<3",
     "curl_cffi>=0.7.0",
     "pyjwt>=2.8.0",
     "websockets>=12.0",

@@ -6,7 +6,7 @@ MCP server that talks directly to aa.com's internal JSON APIs using session cook
 
 ```
 src/aa_mcp_server/
-  server.py         — MCP tool definitions (FastMCP)
+  server.py         — MCP tool definitions (MCPServer)
   api.py            — AAAPI: typed wrappers around each /loyalty/api/* and /api/loyalty/* endpoint
   auth.py           — AASession: cookie jar persistence + CDP extraction
   auth_browser.py   — aa-auth-browser console script (launches Chromium with --remote-debugging-port)

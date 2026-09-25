@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from aa_mcp_server.api import AAAPI, default_activity_window
 from aa_mcp_server.auth import (
@@ -20,7 +20,7 @@ from aa_mcp_server.auth_browser import DEFAULT_PORT
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("AA AAdvantage MCP Server")
+mcp = MCPServer("AA AAdvantage MCP Server")
 
 _apis: dict[str, AAAPI] = {}
 
