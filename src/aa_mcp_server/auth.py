@@ -3,7 +3,10 @@
 import asyncio
 import json
 import logging
+import threading
 import time
+from collections.abc import Iterable
+from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +174,8 @@ class AASession:
             account = get_default_account() or "default"
         self._account = account
         self._session: dict | None = None
+        # Tool calls run on worker threads and the keepalive task renews concurrently.
+        self._lock = threading.Lock()
         self._load()
 
     @property
@@ -211,12 +216,26 @@ class AASession:
             return None
         return self._session.get("aadvantage_number")
 
-    def is_token_expired(self, buffer_seconds: int = 60) -> bool:
-        if token := self.cookie_value("access_token"):
-            if info := _decode_access_token(token):
-                exp = info.get("exp", 0)
-                return time.time() >= (exp - buffer_seconds)
-        return True
+    def update_cookies(self, fresh: Iterable[Cookie]) -> None:
+        """Merge Set-Cookie values from a response into the jar; persist if anything changed.
+
+        Akamai rotates _abck / bm_* on most responses. Keeping them current is part of
+        keeping the session alive.
+        """
+        assert self._session, f"Account '{self._account}' has no saved session"
+        with self._lock:
+            cookies = self._session["cookies"]
+            by_name = {c["name"]: c for c in cookies}
+            changed = False
+            for cookie in fresh:
+                if (existing := by_name.get(cookie.name)) is None:
+                    cookies.append({"name": cookie.name, "value": cookie.value, "domain": cookie.domain})
+                    changed = True
+                elif existing["value"] != cookie.value:
+                    existing["value"] = cookie.value
+                    changed = True
+            if changed:
+                _save_account_session(self._account, self._session)
 
     def check_status(self) -> dict:
         info: dict = {
@@ -228,6 +247,4 @@ class AASession:
             info["saved_at"] = self._session.get("saved_at")
             info["num_cookies"] = len(self._session.get("cookies", []))
             info["aadvantage_number"] = self._session.get("aadvantage_number")
-            info["token_exp"] = self._session.get("token_exp")
-            info["token_expired"] = self.is_token_expired(buffer_seconds=0)
         return info
