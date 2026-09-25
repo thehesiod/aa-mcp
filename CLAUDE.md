@@ -20,6 +20,9 @@ src/aa_mcp_server/
   - `access_token` — RS256 JWT, ~45 min expiry, `sub` is the AAdvantage number, issued by `https://login.aa.com/loyalty`.
   - `refresh_token` — opaque PingFederate format, ~30 day TTL.
 - All AAdvantage APIs are **cookie-authenticated**, not Bearer-authenticated. The JWT just rides along in the cookie jar.
+- **What actually authenticates API calls is the server-side session (`JSESSIONID`), not `access_token`.** Verified: `/loyalty/api/member-information` returns full data with `access_token` and `refresh_token` both removed; drop `JSESSIONID` and you get an HTML page instead. `access_token` expiry (~45 min) is irrelevant to us.
+- The session has a **15-minute sliding idle timeout** — `'sessionTimeOut' : "900"` in the page's `AAUI` config (the SPA warns at 13 min via `sessionExpiresWarningInterval`). `JSESSIONID` is a browser-session cookie with no expiry; neither the cookie nor any response states a lifetime.
+- **Keepalive**: the server's lifespan task POSTs `/shared/session/renew/` (what aa.com's "continue session" dialog calls) for every account every 5 minutes (`KEEPALIVE_INTERVAL_SECONDS`). Every `_request` also merges `Set-Cookie`s (Akamai rotates `_abck` / `bm_*` constantly) back into `session.json`. Sessions only survive while the MCP server is running; a gap >15 min means logging in again.
 - aa.com is fronted by Akamai Bot Manager. Stdlib HTTP (httpx, requests) gets TLS-dropped at the edge. We use `curl_cffi` with `impersonate="chrome131"` — same pattern as costco-mcp.
 - The browser sends a `x-xsrf-token` header on `/loyalty/api/*` calls. Its value mirrors the `XSRF-TOKEN` cookie.
 
@@ -59,7 +62,7 @@ All tools return JSON-stringified API responses (no formatting). The data is ric
 
 ### Cookie expiry
 
-Symptom: any tool returns `AAAuthExpired`. The `access_token` cookie's JWT `exp` claim is the ground truth — `check_auth_status` reports it.
+Symptom: any tool returns `AAAuthExpired`, or `check_auth_status` reports `session_alive: false` (it makes a real `member-information` call). A dead session comes back as **HTTP 200 with an HTML page**, not a 401 — `_request` treats any non-JSON body as `AAAuthExpired`. `AAAuthExpired` subclasses MCP's `ToolError` so the re-login hint reaches the client (mcp 2.x hides the text of other exceptions).
 
 Fix: relaunch `aa-auth-browser <account>`. Just opening aa.com in that browser triggers a silent token refresh (Ping rotates `access_token` from `refresh_token`). Then re-run `--extract-session` to copy the new cookies.
 

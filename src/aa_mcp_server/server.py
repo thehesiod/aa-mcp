@@ -1,12 +1,16 @@
 """American Airlines AAdvantage MCP Server — read-only, multi-account."""
 
+import asyncio
 import json
 import logging
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+from curl_cffi.requests.exceptions import RequestException
 from mcp.server.mcpserver import MCPServer
 
-from aa_mcp_server.api import AAAPI, default_activity_window
+from aa_mcp_server.api import AAAPI, AAAuthExpired, default_activity_window
 from aa_mcp_server.auth import (
     AASession,
     extract_session_from_browser,
@@ -20,9 +24,36 @@ from aa_mcp_server.auth_browser import DEFAULT_PORT
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
-mcp = MCPServer("AA AAdvantage MCP Server")
+# aa.com expires the server-side session after sessionTimeOut=900s idle (from the page's
+# AAUI config); renew well inside that window.
+KEEPALIVE_INTERVAL_SECONDS = 5 * 60
 
 _apis: dict[str, AAAPI] = {}
+
+
+async def _keepalive_loop() -> None:
+    while True:
+        for account in list_accounts():
+            api = _get_api(account)
+            if not api._session.is_authenticated:
+                continue
+            try:
+                await asyncio.to_thread(api.renew_session)
+            except (AAAuthExpired, RequestException) as e:
+                logger.warning("AA session keepalive failed for '%s': %s", account, e)
+        await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def _lifespan(_: MCPServer) -> AsyncIterator[None]:
+    task = asyncio.create_task(_keepalive_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
+mcp = MCPServer("AA AAdvantage MCP Server", lifespan=_lifespan)
 
 
 def _get_api(account: str = "") -> AAAPI:
@@ -38,13 +69,23 @@ def _evict(account: str) -> None:
 
 @mcp.tool()
 def check_auth_status(account: str = "") -> str:
-    """Check the saved AA session for an account — token expiry, AAdvantage #, cookie count.
+    """Check the saved AA session for an account — whether it is still live, AAdvantage #, cookie count.
+
+    `session_alive` comes from a real API call. The server keeps sessions alive while it runs;
+    once one has idled out, the user must log in via aa-auth-browser again.
 
     Args:
         account: Account name (optional, uses default).
     """
     api = _get_api(account)
     info = api._session.check_status()
+    if api._session.is_authenticated:
+        try:
+            api.member_information()
+            info["session_alive"] = True
+        except AAAuthExpired as e:
+            info["session_alive"] = False
+            info["error"] = str(e)
     info["all_accounts"] = list_accounts()
     info["default_account"] = get_default_account()
     return json.dumps(info, indent=2, default=str)

@@ -1,5 +1,6 @@
 """American Airlines aa.com API client — cookie-based auth, curl_cffi chrome impersonation."""
 
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -7,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from curl_cffi import requests as curl_requests
+from mcp.server.mcpserver.exceptions import ToolError
 from yarl import URL
 
 from aa_mcp_server.auth import AASession
@@ -44,6 +46,9 @@ RESHOP_CHEAPEST = f"{BASE}/manage-reservation/reshop/api/reshop/cheapest"
 
 GRAPHQL_ENDPOINT = f"{BASE}/services/graphql"
 
+# Server-side session keepalive: what aa.com's "continue session" dialog calls.
+SESSION_RENEW = f"{BASE}/shared/session/renew/"
+
 # Persisted-query hash for the GetCustomer operation discovered in browser bundle.
 GRAPHQL_GET_CUSTOMER_HASH = (
     "73f3ea543fffb8f17183ee4d3adcb824c1bd91b1b5727a524af33499d2d863eb"
@@ -55,8 +60,18 @@ _USER_AGENT = (
 )
 
 
-class AAAuthExpired(RuntimeError):
-    """Raised when the saved cookies no longer authenticate."""
+class AAAuthExpired(ToolError):
+    """Raised when the saved cookies no longer authenticate.
+
+    A ToolError so MCPServer passes the re-login instructions through to the client
+    (other exceptions are reduced to a generic "Error executing tool").
+    """
+
+
+_RELOGIN_HINT = (
+    "Re-run aa-auth-browser, log in (or reload aa.com), then "
+    "call save_session_from_browser to refresh cookies."
+)
 
 
 class AAAPI:
@@ -111,14 +126,22 @@ class AAAPI:
             impersonate=_IMPERSONATE,
             timeout=30,
         )
+        self._session.update_cookies(resp.cookies.jar)
         if resp.status_code in (401, 403):
-            raise AAAuthExpired(
-                f"AA API {url} returned {resp.status_code}. "
-                f"Re-run aa-auth-browser, log in (or reload aa.com), then "
-                f"call save_session_from_browser to refresh cookies."
-            )
+            raise AAAuthExpired(f"AA API {url} returned {resp.status_code}. {_RELOGIN_HINT}")
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return resp.json()
+        except json.JSONDecodeError as e:
+            # A dead JSESSIONID (or an Akamai challenge) comes back as a 200 HTML page.
+            raise AAAuthExpired(
+                f"AA API {url} returned {resp.headers.get('content-type')} instead of JSON — "
+                f"the session has expired. {_RELOGIN_HINT}"
+            ) from e
+
+    def renew_session(self) -> None:
+        """Reset aa.com's 15-minute idle timeout on the server-side session (JSESSIONID)."""
+        self._request("POST", SESSION_RENEW, extra_headers={"X-Requested-With": "XMLHttpRequest"})
 
     # ---- /loyalty/api/* ----
 

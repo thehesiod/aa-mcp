@@ -19,7 +19,7 @@ This is **not** a browser-automation wrapper. The server discovers and calls aa.
 | `get_trip_credits` | `/api/loyalty/travelCredits/tripCredit/details` | Multi-passenger / itinerary credits |
 | `get_partner_offers` | `/loyalty/api/partnerOffers` | Dashboard partner promotions |
 | `get_notifications` | `/loyalty/api/notifications` | Account notifications |
-| `check_auth_status` | — | Saved-session info: AA #, token expiry, cookie count |
+| `check_auth_status` | — | Saved-session info: AA #, cookie count, and `session_alive` (live API check) |
 | `save_session_from_browser` | CDP | Pulls cookies from a logged-in Chromium and persists them |
 
 ## Setup
@@ -80,7 +80,7 @@ Add to your MCP client config (e.g. Claude Desktop):
 ## Limitations
 
 - **Read-only.** No booking, no award redemption, no profile edits.
-- **Cookie expiry.** The `access_token` JWT lives ~45 min; the `refresh_token` cookie typically ~30 days. Visiting any aa.com page in the saved Chromium profile silently refreshes both. After a long gap, re-extract.
+- **Session expiry.** API calls ride on aa.com's server-side session, which idles out after 15 minutes. While running, the server renews every saved session every 5 minutes, so it stays alive as long as the MCP server is up. After a longer gap, relaunch `aa-auth-browser` (the saved profile usually logs back in silently) and re-extract.
 - **GraphQL coverage.** Only the `GetCustomer` persisted query is wired up. Expanding requires capturing additional sha256Hashes from the browser bundle — easy but a per-feature task.
 - **One region tested.** All testing has been on US-locale aa.com. International locales may require different `referer` paths.
 
